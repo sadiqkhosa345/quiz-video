@@ -208,11 +208,14 @@
     const qs = check();
     if (!qs) return;
     const btn = $("makeBtn");
+    // iPhone only lets sound start from a tap: open the audio now, before anything else waits.
+    let liveAudio = null;
+    try { liveAudio = new (window.AudioContext || window.webkitAudioContext)(); liveAudio.resume(); } catch (e) { /* none */ }
     btn.disabled = true; $("progressBox").hidden = false; $("result").hidden = true;
     const keepAwake = navigator.wakeLock ? await navigator.wakeLock.request("screen").catch(() => null) : null;
     const started = performance.now();
     try {
-      const out = await R.makeVideo(qs, settings(), (f, msg) => { $("bar").style.width = Math.round(f * 100) + "%"; $("status").textContent = msg; });
+      const out = await R.makeVideo(qs, Object.assign(settings(), { liveAudio, forceRealtime: /[?&]realtime/.test(location.search) }), (f, msg) => { $("bar").style.width = Math.round(f * 100) + "%"; $("status").textContent = msg; });
       lastVideo = out;
       const url = URL.createObjectURL(out.blob);
       $("player").src = url;
@@ -225,6 +228,7 @@
       $("status").textContent = "Video nahi bani: " + (err && err.message ? err.message : err);
     } finally {
       btn.disabled = false;
+      if (liveAudio) liveAudio.close().catch(() => {});
       if (keepAwake) keepAwake.release().catch(() => {});
     }
   };
