@@ -11,7 +11,8 @@
   const LETTERS = "ABCD";
   const URDU = /[؀-ۿ]/;
   const URDU_FONT = '"Noto Nastaliq Urdu"', LATIN_FONT = '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-  const OPT_FIRST = 0.8, OPT_STAGGER = 0.45, FADE = 0.5, REVEAL_FADE = 0.3, MIN_TIMER = 3;
+  // The question shows alone first; options (or the "ek jawab" picture card) start 2.5s later.
+  const OPT_FIRST = 2.5, OPT_STAGGER = 0.45, FADE = 0.5, REVEAL_FADE = 0.3, MIN_TIMER = 3;
 
   const THEMES = {
     Purple: ["#5B21B6", "#DB2777"], Ocean: ["#0369A1", "#1E1B4B"], Sunset: ["#F97316", "#BE123C"],
