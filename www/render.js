@@ -635,18 +635,91 @@
     return null;
   }
 
+  function realtimeMime() {
+    if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) return null;
+    for (const m of ['video/mp4;codecs="avc1.640028,mp4a.40.2"', "video/mp4;codecs=avc1,mp4a.40.2", "video/mp4"]) {
+      try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) { /* next */ }
+    }
+    return null;
+  }
+
+  /** Plays the finished sound track and draws the frames in step with it while MediaRecorder records
+   *  canvas + sound (what iPhone Safari offers instead of an audio encoder). Takes as long as the video. */
+  async function recordRealtime(questions, s, Ts, offsets, total, mixed, size, onProgress, warnings, mime) {
+    let [width, height] = size;
+    if (height > 1920) { width = 1080; height = 1920; warnings.push("Is phone par 4K awaz ke saath nahi banti: 1080p bani."); }
+    const live = s.liveAudio || new (window.AudioContext || window.webkitAudioContext)();
+    if (live.state !== "running") await live.resume().catch(() => {});
+    if (live.state !== "running") throw new Error("Awaz shuru nahi ho saki. Dobara 'Video banao' dabayein.");
+    const dest = live.createMediaStreamDestination();
+    const frame = canvas(width, height), fctx = frame.getContext("2d");
+    const work = width === W ? frame : canvas(), wctx = work.getContext("2d");
+    const { design, theme, bg } = prepare(s);
+    const layers = [];
+    const layer = (k) => layers[k] || (layers[k] = buildLayers(questions[k], k + 1, s, design, theme));
+    const at = (t) => { let k = 0; while (k < offsets.length - 1 && t >= offsets[k + 1]) k++; return k; };
+    const draw = (t) => {
+      const k = at(t);
+      drawFrame(wctx, bg, layer(k), questions[k], Ts[k], t - offsets[k], s, design);
+      if (work !== frame) fctx.drawImage(work, 0, 0, width, height);
+      return k;
+    };
+    onProgress(0.15, "Tasveerein tayyar ho rahi hain...");
+    draw(0);
+
+    const stream = new MediaStream([...frame.captureStream(FPS).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: Math.round(10e6 * width * height / (1080 * 1920)), audioBitsPerSecond: 192000 });
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise((r) => (rec.onstop = r));
+    const src = live.createBufferSource();
+    src.buffer = mixed; src.connect(dest);
+    rec.start(1000);
+    const start = live.currentTime + 0.2;
+    src.start(start);
+
+    let current = 0;
+    await new Promise((done) => {
+      const step = () => {
+        const t = Math.max(0, live.currentTime - start);
+        const k = draw(Math.min(t, total - 0.001));
+        if (k !== current) {                       // free the last question, get the next one ready
+          if (layers[current]) { freeLayers(layers[current]); layers[current] = null; }
+          current = k;
+          if (k + 1 < questions.length) setTimeout(() => layer(k + 1), 50);
+        }
+        onProgress(0.15 + 0.83 * Math.min(1, t / total), `Recording ${Math.round(100 * Math.min(1, t / total))}%: app khuli rakhein, screen band na karein`);
+        if (t >= total + 0.15) return done();
+        document.hidden ? setTimeout(step, 1000 / FPS) : requestAnimationFrame(step);
+      };
+      if (questions.length > 1) setTimeout(() => layer(1), 50);
+      step();
+    });
+    rec.stop();
+    await stopped;
+    stream.getTracks().forEach((tr) => tr.stop());
+    layers.forEach((L) => L && freeLayers(L));
+    free(frame, work, bg);
+    if (!s.liveAudio) live.close();
+    onProgress(1, "Tayyar!");
+    return { blob: new Blob(chunks, { type: "video/mp4" }), seconds: total, warnings, size: [width, height] };
+  }
+
   /**
    * questions: [{type:"mcq"|"single", question, options[4], correct, answer, qImage, aImage, gallery[]}] (images: ImageBitmap)
    * s: {design, theme, background, countdown, timer, answerSecs, length, voice, tick, music (AudioBuffer|null), showHead, title, res}
    * onProgress(fraction, message). Returns {blob, seconds, warnings}.
    */
   async function makeVideo(questions, s, onProgress) {
-    if (typeof VideoEncoder === "undefined") throw new Error("Ye phone video encoder (WebCodecs) support nahi karta. Chrome / Android System WebView update karein.");
     const warnings = [];
     const [width, height] = SIZES[s.res] || SIZES[1080];
-    let vcfg = await pickVideoConfig(width, height);
-    if (!vcfg && s.res === 2160) { warnings.push("4K is phone par nahi bana, 1080p bani."); return makeVideo(questions, Object.assign({}, s, { res: 1080 }), onProgress).then((r) => (r.warnings.unshift(...warnings), r)); }
-    if (!vcfg) throw new Error("Is phone par H.264 video encoder nahi mila.");
+    if (typeof VideoEncoder === "undefined" && !realtimeMime()) throw new Error("Ye phone video encoder support nahi karta. Chrome / Android System WebView ya iOS update karein.");
+    if (typeof VideoEncoder !== "undefined") {
+      const vcfg = await pickVideoConfig(width, height);
+      if (!vcfg && s.res === 2160) { warnings.push("4K is phone par nahi bana, 1080p bani."); return makeVideo(questions, Object.assign({}, s, { res: 1080 }), onProgress).then((r) => (r.warnings.unshift(...warnings), r)); }
+      if (!vcfg && !realtimeMime()) throw new Error("Is phone par H.264 video encoder nahi mila.");
+      s = Object.assign({}, s, { _vcfg: vcfg });
+    }
 
     // 1. Voices
     const actx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
@@ -690,8 +763,10 @@
     }
     const mixed = await off.startRendering();
 
-    // 4. Encoders + muxer
-    const acfg = await pickAudioConfig();
+    // 4. Encoders + muxer. No audio encoder (iPhone Safari): record in real time instead, so the sound stays.
+    const acfg = s.forceRealtime ? null : await pickAudioConfig();
+    const rtMime = realtimeMime();
+    if ((!acfg || !s._vcfg) && rtMime) return recordRealtime(questions, s, Ts, offsets, total, mixed, [width, height], onProgress, warnings, rtMime);
     if (!acfg) warnings.push("Is phone par audio encoder nahi: video bina awaz ke bani.");
     const muxer = new Mp4Muxer.Muxer({
       target: new Mp4Muxer.ArrayBufferTarget(),
@@ -702,7 +777,7 @@
     });
     let encError = null;
     const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => (encError = e) });
-    venc.configure(vcfg);
+    venc.configure(s._vcfg);
     if (acfg) {
       const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => (encError = e) });
       aenc.configure(acfg[0]);
