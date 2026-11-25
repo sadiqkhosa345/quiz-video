@@ -1,0 +1,76 @@
+# Builds an unsigned iPhone app (QuizVideo.ipa) on GitHub's Mac. Install it with Sideloadly (free Apple ID,
+# re-sign every 7 days) or sign it with a paid Apple Developer account.
+name: iPhone app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm ci
+
+      - name: Create the iOS project
+        run: |
+          rm -rf ios
+          npx cap add ios
+          npx cap sync ios
+
+      - name: App name, icon and permissions
+        run: |
+          PLIST=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Quiz Video" "$PLIST" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Quiz Video" "$PLIST"
+          for k in NSPhotoLibraryUsageDescription:"Sawal aur jawab ki tasveerein chunne ke liye." \
+                   NSPhotoLibraryAddUsageDescription:"Bani hui video Photos mein save karne ke liye." \
+                   NSCameraUsageDescription:"Sawal ke liye photo khinchne ke liye."; do
+            key="${k%%:*}"; val="${k#*:}"
+            /usr/libexec/PlistBuddy -c "Delete :$key" "$PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :$key string $val" "$PLIST"
+          done
+          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" || true
+          ICONS=ios/App/App/Assets.xcassets/AppIcon.appiconset
+          for f in "$ICONS"/*.png; do cp resources/icon-1024.png "$f"; done
+          ls "$ICONS"
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild -version
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+          test -d build/Build/Products/Release-iphoneos/App.app
+
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/App.app Payload/
+          zip -qry QuizVideo.ipa Payload
+          ls -la QuizVideo.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuizVideo-ipa
+          path: QuizVideo.ipa
+
+      - name: Publish as the "ios-latest" release (easy download link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest --yes --cleanup-tag || true
+          gh release create ios-latest QuizVideo.ipa --title "iPhone app (latest)" \
+            --notes "Unsigned IPA from commit ${GITHUB_SHA::7}. Install with Sideloadly using your Apple ID."

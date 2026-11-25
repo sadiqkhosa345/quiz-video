@@ -1,0 +1,9 @@
+{
+  "appId": "com.quizvideo.maker",
+  "appName": "Quiz Video",
+  "webDir": "www",
+  "plugins": {
+    "CapacitorHttp": { "enabled": false }
+  },
+  "android": { "allowMixedContent": false }
+}
