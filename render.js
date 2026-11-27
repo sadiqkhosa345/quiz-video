@@ -721,10 +721,30 @@
     }
     return null;
   }
+  /** Loudest sample of an AudioBuffer (every 7th sample is plenty). */
+  function peak(buf) {
+    let m = 0;
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < d.length; i += 7) { const v = Math.abs(d[i]); if (v > m) m = v; }
+    }
+    return m;
+  }
+  /** How loud the sound in a finished MP4 is when decoded again (0 = silent or unreadable). */
+  async function soundIn(blob) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+      ctx.close();
+      return peak(buf);
+    } catch (e) { return 0; }
+  }
+
   async function pickAudioConfig() {
     if (typeof AudioEncoder === "undefined") return null;
     for (const [codec, kind] of [["mp4a.40.2", "aac"], ["opus", "opus"]]) {
       const cfg = { codec, sampleRate: 48000, numberOfChannels: 2, bitrate: 192000 };
+      if (kind === "aac") cfg.aac = { format: "aac" };
       try { if ((await AudioEncoder.isConfigSupported(cfg)).supported) return [cfg, kind]; } catch (e) { /* next */ }
     }
     return null;
@@ -856,6 +876,7 @@
       src.connect(g).connect(off.destination); src.start(0);
     }
     const mixed = await off.startRendering();
+    if (peak(mixed) < 0.01) warnings.push("Awaz mix khali bani (sab awazein 'Koi nahi'?).");
 
     // 4. Encoders + muxer. No audio encoder (iPhone Safari): record in real time instead, so the sound stays.
     const acfg = s.forceRealtime ? null : await pickAudioConfig();
@@ -873,7 +894,14 @@
     const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: (e) => (encError = e) });
     venc.configure(s._vcfg);
     if (acfg) {
-      const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: (e) => (encError = e) });
+      const aenc = new AudioEncoder({
+        output: (c, m) => {
+          // AAC needs its AudioSpecificConfig in the MP4; some encoders don't hand it over (LC, 48 kHz, stereo = 11 90).
+          if (acfg[1] === "aac" && m && m.decoderConfig && !m.decoderConfig.description) m.decoderConfig.description = new Uint8Array([0x11, 0x90]);
+          muxer.addAudioChunk(c, m);
+        },
+        error: (e) => (encError = e),
+      });
       aenc.configure(acfg[0]);
       const L = mixed.getChannelData(0), R = mixed.getChannelData(1), step = 4800;
       for (let i = 0; i < mixed.length; i += step) {
@@ -916,8 +944,22 @@
     free(frame, work, bg);
     if (encError) throw encError;
     muxer.finalize();
+    const blob = new Blob([muxer.target.buffer], { type: "video/mp4" });
+    // Some phones (iPhone) encode the sound but it doesn't play back: check, and record live instead if so.
+    if (acfg && peak(mixed) > 0.01) {
+      onProgress(0.99, "Awaz check ho rahi hai...");
+      const heard = await soundIn(blob);
+      if (heard < 0.003) {
+        if (rtMime && !s._noRetry) {
+          return recordRealtime(questions, Object.assign({}, s, { _noRetry: true }), Ts, offsets, total, mixed, [width, height], onProgress, warnings, rtMime)
+            .then((r) => Object.assign(r, { audio: r.audio === "live" ? "live (encoder ki awaz khali thi)" : r.audio }));
+        }
+        warnings.push("Is phone ka audio encoder khali awaz de raha hai.");
+        return { blob, seconds: total, warnings, size: [width, height], audio: "none" };
+      }
+    }
     onProgress(1, "Tayyar!");
-    return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), seconds: total, warnings, size: [width, height], audio: acfg ? "encoder" : "none" };
+    return { blob, seconds: total, warnings, size: [width, height], audio: acfg ? "encoder" : "none" };
   }
 
   window.QuizRender = { DESIGNS, THEMES, BACKGROUNDS, COUNTDOWNS, TICKS, Q_SOUNDS, A_SOUNDS, END_SOUNDS, previewSound, renderStill, makeVideo, W, H };
