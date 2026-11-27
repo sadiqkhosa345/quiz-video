@@ -797,7 +797,7 @@
     free(frame, work, bg);
     if (!s.liveAudio) live.close();
     onProgress(1, "Tayyar!");
-    return { blob: new Blob(chunks, { type: "video/mp4" }), seconds: total, warnings, size: [width, height] };
+    return { blob: new Blob(chunks, { type: "video/mp4" }), seconds: total, warnings, size: [width, height], audio: stream.getAudioTracks().length ? "live" : "none" };
   }
 
   /**
@@ -917,7 +917,7 @@
     if (encError) throw encError;
     muxer.finalize();
     onProgress(1, "Tayyar!");
-    return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), seconds: total, warnings, size: [width, height] };
+    return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), seconds: total, warnings, size: [width, height], audio: acfg ? "encoder" : "none" };
   }
 
   window.QuizRender = { DESIGNS, THEMES, BACKGROUNDS, COUNTDOWNS, TICKS, Q_SOUNDS, A_SOUNDS, END_SOUNDS, previewSound, renderStill, makeVideo, W, H };
