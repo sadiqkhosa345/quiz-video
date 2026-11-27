@@ -9,13 +9,13 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
   };
-  const newQ = () => ({ type: "mcq", question: "", options: ["", "", "", ""], correct: 0, answer: "", qImage: null, aImage: null, gallery: [] });
+  const newQ = () => ({ type: "mcq", question: "", options: ["", "", "", ""], correct: 0, answer: "", qImage: null, aImage: null, gallery: [], optImages: [null, null, null, null] });
 
-  let quiz = (store.get(DRAFT, null) || []).map((q) => Object.assign(newQ(), q, { qImage: null, aImage: null, gallery: [] }));
+  let quiz = (store.get(DRAFT, null) || []).map((q) => Object.assign(newQ(), q, { qImage: null, aImage: null, gallery: [], optImages: [null, null, null, null] }));
   if (!quiz.length) quiz = [newQ()];
   let qi = 0;
   const prefs = Object.assign({ design: "Classic", theme: "Purple", background: "Auto", countdown: "Number + bar", timer: 10,
-    answerSecs: 3, length: 25, res: "1080", tick: "Clock", voice: true, showHead: false, title: "QUIZ" }, store.get(PREFS, {}));
+    answerSecs: 3, length: 25, res: "1080", tick: "Clock", qSound: "Whoosh", aSound: "Ding", endSound: "3-2-1 beep", voice: true, showHead: false, title: "QUIZ" }, store.get(PREFS, {}));
   let music = null, musicName = "", lastVideo = null;
 
   function toast(msg, ms = 3500) {
@@ -32,7 +32,7 @@
     const c = document.querySelector('input[name="correct"]:checked');
     q.correct = c ? +c.value : 0;
     q.answer = $("answer").value.trim();
-    store.set(DRAFT, quiz.map(({ qImage, aImage, gallery, ...rest }) => rest));
+    store.set(DRAFT, quiz.map(({ qImage, aImage, gallery, optImages, ...rest }) => rest));
   }
   function loadQ() {
     const q = quiz[qi];
@@ -59,6 +59,12 @@
     $("aImgBtn").classList.toggle("on", !!q.aImage);
     $("qImgBtn").classList.toggle("on", !!q.qImage);
     $("galBtn").classList.toggle("on", q.gallery.length > 0);
+    document.querySelectorAll(".optPic").forEach((b) => {
+      const img = q.optImages[+b.dataset.i];
+      b.classList.toggle("on", !!img);
+      b.style.backgroundImage = img ? `url(${thumbUrl(img)})` : "";
+      document.querySelector(`.optClear[data-i="${b.dataset.i}"]`).hidden = !img;
+    });
     const strip = $("galStrip"); strip.innerHTML = "";
     for (const img of q.gallery) {
       const c = document.createElement("canvas");
@@ -67,6 +73,16 @@
       c.style.height = "64px"; c.style.borderRadius = "8px";
       strip.appendChild(c);
     }
+  }
+  const thumbs = new WeakMap();
+  function thumbUrl(img) {
+    if (!thumbs.has(img)) {
+      const c = document.createElement("canvas"), s = 96 / Math.min(img.width, img.height);
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      thumbs.set(img, c.toDataURL("image/jpeg", 0.8)); c.width = c.height = 0;
+    }
+    return thumbs.get(img);
   }
   async function loadImage(file) {
     const bmp = await createImageBitmap(file);
@@ -108,6 +124,15 @@
     }
     e.target.value = "";
   };
+  document.querySelectorAll(".optImg").forEach((inp) => (inp.onchange = async (e) => {
+    const f = e.target.files[0], i = +inp.dataset.i;
+    if (f) {
+      try { quiz[qi].optImages[i] = await loadImage(f); picLabels(); drawThumbs(); }
+      catch (err) { toast("Ye image nahi khuli."); }
+    }
+    e.target.value = "";
+  }));
+  document.querySelectorAll(".optClear").forEach((b) => (b.onclick = () => { quiz[qi].optImages[+b.dataset.i] = null; picLabels(); drawThumbs(); }));
   $("clearPics").onclick = () => { Object.assign(quiz[qi], { qImage: null, aImage: null, gallery: [] }); picLabels(); };
 
   // ---------- style ----------
@@ -120,13 +145,13 @@
     return {
       design: prefs.design, theme: prefs.theme, background: prefs.background, countdown: prefs.countdown,
       timer: Math.max(3, Math.min(30, +$("timer").value || 10)), answerSecs: Math.max(1, Math.min(30, +$("answerSecs").value || 3)),
-      length: Math.max(0, +$("length").value || 0), res: +$("res").value, tick: $("tick").value, voice: $("voice").checked,
+      length: Math.max(0, +$("length").value || 0), res: +$("res").value, tick: $("tick").value, qSound: $("qSound").value, aSound: $("aSound").value, endSound: $("endSound").value, voice: $("voice").checked,
       showHead: $("showHead").checked, title: $("title").value.trim() || "QUIZ", music,
     };
   }
   function savePrefs() {
     const s = settings();
-    Object.assign(prefs, { timer: s.timer, answerSecs: s.answerSecs, length: s.length, res: String(s.res), tick: s.tick, voice: s.voice, showHead: s.showHead, title: s.title });
+    Object.assign(prefs, { timer: s.timer, answerSecs: s.answerSecs, length: s.length, res: String(s.res), tick: s.tick, qSound: s.qSound, aSound: s.aSound, endSound: s.endSound, voice: s.voice, showHead: s.showHead, title: s.title });
     store.set(PREFS, prefs);
   }
   function chips(el, values, key, onPick) {
@@ -198,8 +223,9 @@
     if (!qs.length) return toast("Pehle sawal likhein."), null;
     for (const [n, q] of qs.entries()) {
       if (q.type === "single" && !(q.answer || q.aImage)) return toast(`Sawal ${n + 1}: jawab likhein ya "Jawab ki image" chunein.`), null;
-      if (q.type === "mcq" && q.options.filter(Boolean).length < 2) return toast(`Sawal ${n + 1}: kam az kam 2 options likhein.`), null;
-      if (q.type === "mcq" && !q.options[q.correct]) return toast(`Sawal ${n + 1}: sahi jawab wala option khali hai.`), null;
+      const has = (i) => !!(q.options[i] || q.optImages[i]);
+      if (q.type === "mcq" && [0, 1, 2, 3].filter(has).length < 2) return toast(`Sawal ${n + 1}: kam az kam 2 options likhein (ya image lagayein).`), null;
+      if (q.type === "mcq" && !has(q.correct)) return toast(`Sawal ${n + 1}: sahi jawab wala option khali hai.`), null;
     }
     return qs;
   }
@@ -281,12 +307,21 @@
   async function start() {
     $("timer").value = prefs.timer; $("answerSecs").value = prefs.answerSecs; $("length").value = prefs.length;
     $("res").value = prefs.res; $("voice").checked = prefs.voice; $("showHead").checked = prefs.showHead; $("title").value = prefs.title;
-    $("tick").innerHTML = R.TICKS.map((t) => `<option>${t}</option>`).join(""); $("tick").value = prefs.tick;
-    ["timer", "answerSecs", "length", "res", "tick", "voice", "showHead", "title"].forEach((id) => $(id).addEventListener("change", savePrefs));
+    for (const [id, list] of [["tick", R.TICKS], ["qSound", R.Q_SOUNDS], ["aSound", R.A_SOUNDS], ["endSound", R.END_SOUNDS]]) {
+      $(id).innerHTML = list.map((t) => `<option>${t}</option>`).join(""); $(id).value = prefs[id];
+    }
+    let fx = null;
+    document.querySelectorAll("button.play").forEach((b) => (b.onclick = () => {
+      try {
+        fx = fx || new (window.AudioContext || window.webkitAudioContext)();
+        fx.resume(); R.previewSound(fx, b.dataset.k, $(b.dataset.sel).value);
+      } catch (e) { toast("Awaz nahi chali."); }
+    }));
+    ["timer", "answerSecs", "length", "res", "tick", "qSound", "aSound", "endSound", "voice", "showHead", "title"].forEach((id) => $(id).addEventListener("change", savePrefs));
     $("showHead").addEventListener("change", drawThumbs);
     if (!native()) {                   // a web page can't fetch the TTS voice (browser blocks it): Android app only
       $("voice").checked = false; $("voice").disabled = true;
-      $("voice").nextElementSibling.textContent = "Awaz (sawal + jawab bolna) sirf Android app mein. Ticks aur music yahan bhi.";
+      $("voiceLbl").textContent = "Bolne wali awaz sirf app (Android / iPhone) mein chalti hai, browser mein nahi. Neeche wali awazein yahan bhi chalti hain.";
     }
     swatches();
     chips($("backgrounds"), R.BACKGROUNDS, "background", drawThumbs);

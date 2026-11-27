@@ -23,6 +23,9 @@
   const BACKGROUNDS = ["Auto", "Plain", "Dots", "Bokeh", "Grid", "Waves", "Stripes", "Sunburst", "Confetti"];
   const COUNTDOWNS = ["Number + bar", "Circle ring", "Color bar"];
   const TICKS = ["Tick", "Clock", "Beep", "Drum", "Koi nahi"];
+  const Q_SOUNDS = ["Whoosh", "Pop", "Chime", "Koi nahi"];            // when the question comes in
+  const A_SOUNDS = ["Ding", "Tada", "Correct", "Koi nahi"];           // when the answer shows
+  const END_SOUNDS = ["3-2-1 beep", "Buzzer", "Dono", "Koi nahi"];    // end of the countdown
 
   // ---------- colour + shape helpers ----------
   function rgb(c) {
@@ -404,6 +407,23 @@
   function free(...cs) { for (const c of cs.flat()) if (c && c.width) { c.width = 0; c.height = 0; } }
   function freeLayers(L) { free(L.base, L.reveal, L.opts || [], L.gallery || []); }
 
+  /** Text (and picture, if the option has one) inside option box i. Grid boxes: text along the top between
+   *  the letter and the tick, picture below. List rows: square picture after the letter, text to its right. */
+  function optionContent(ctx, design, q, i, colour) {
+    const img = q.optImages && q.optImages[i], label = q.options[i];
+    if (!img) return text(ctx, label, ...design.optText(i), colour, design.optShadow);
+    const [x0, y0, x1, y1] = design.boxes()[i];
+    if (design.layout === "grid") {
+      drawCover(ctx, img, [x0 + 18, y0 + 112, x1 - 18, y1 - 18], 22);
+      if (label) text(ctx, label, (x0 + x1) / 2, y0 + 58, x1 - x0 - 240, 92, 44, 22, colour, design.optShadow);
+      return;
+    }
+    const px = x0 + 142, side = y1 - y0 - 24;
+    drawCover(ctx, img, [px, y0 + 12, px + side, y1 - 12], 18);
+    const xa = px + side + 18, xb = x1 - 120;
+    if (label) text(ctx, label, (xa + xb) / 2, (y0 + y1) / 2, xb - xa, y1 - y0 - 30, 58, 24, colour, design.optShadow);
+  }
+
   function buildLayers(q, number, s, design, theme) {
     const L = {};
     const c = design.colors;
@@ -432,7 +452,7 @@
       for (let i = 0; i < 4; i++) {
         const o = canvas(), ox = o.getContext("2d");
         design.option(ox, i, false, theme);
-        text(ox, q.options[i], ...design.optText(i), c.opt, design.optShadow);
+        optionContent(ox, design, q, i, c.opt);
         L.opts.push(o);
       }
     }
@@ -453,7 +473,7 @@
         const right = i === q.correct;
         rx.save(); if (!right) rx.globalAlpha = design.dim;
         design.option(rx, i, right, theme);
-        text(rx, q.options[i], ...design.optText(i), right ? c.optRight : c.opt, design.optShadow);
+        optionContent(rx, design, q, i, right ? c.optRight : c.opt);
         rx.restore();
       }
       const opt = q.options[q.correct];
@@ -608,6 +628,81 @@
       o.connect(g).connect(ctx.destination); o.start(when); o.stop(when + 1.25);
     }
   }
+  /** One synth note: frequency f (gliding to fEnd), sharp attack, decay to silence over dur. */
+  function tone(ctx, when, f, dur, amp, type = "sine", fEnd = 0, filter = 0) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f, when);
+    if (fEnd) o.frequency.exponentialRampToValueAtTime(fEnd, when + dur * 0.8);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(amp, when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    let node = o.connect(g);
+    if (filter) { const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = filter; node = node.connect(lp); }
+    node.connect(ctx.destination);
+    o.start(when); o.stop(when + dur + 0.05);
+  }
+  let noiseBuf = null;
+  /** Filtered noise whose band sweeps from f0 to f1 (a "whoosh"). */
+  function whoosh(ctx, when, dur, amp, f0, f1) {
+    if (!noiseBuf || noiseBuf.sampleRate !== ctx.sampleRate) {
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0), rnd = seeded(7);
+      for (let i = 0; i < d.length; i++) d[i] = rnd() * 2 - 1;
+    }
+    const src = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noiseBuf; bp.type = "bandpass"; bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(f0, when); bp.frequency.exponentialRampToValueAtTime(f1, when + dur);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(amp, when + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    src.connect(bp).connect(g).connect(ctx.destination);
+    src.start(when); src.stop(when + dur + 0.05);
+  }
+  function questionSound(ctx, name, when) {
+    if (name === "Whoosh") { whoosh(ctx, when, 0.55, 0.9, 300, 4000); tone(ctx, when + 0.45, 220, 0.35, 0.25, "sine", 110); }
+    if (name === "Pop") { tone(ctx, when, 420, 0.12, 0.5, "sine", 1100); tone(ctx, when + 0.12, 620, 0.12, 0.4, "sine", 1500); }
+    if (name === "Chime") [1047, 1319, 1568, 2093].forEach((f, i) => tone(ctx, when + i * 0.09, f, 0.9, 0.22, "triangle"));
+  }
+  /** A soft pop as each option slides in (only with a question sound). */
+  function optionPop(ctx, when) { tone(ctx, when, 500, 0.08, 0.22, "sine", 950); }
+  function answerSound(ctx, name, when) {
+    if (name === "Ding") scheduleDing(ctx, when);
+    if (name === "Tada") {
+      tone(ctx, when, 784, 0.1, 0.28, "triangle"); tone(ctx, when + 0.1, 988, 0.1, 0.28, "triangle");
+      for (const f of [523, 659, 784, 1047]) tone(ctx, when + 0.22, f, 1.4, 0.2, "triangle");
+    }
+    if (name === "Correct") { tone(ctx, when, 988, 0.14, 0.3, "square", 0, 3500); tone(ctx, when + 0.13, 1319, 0.6, 0.3, "square", 0, 3500); }
+  }
+  /** End of the countdown: beeps on the last 3 seconds and/or a buzzer as time runs out. */
+  function endSound(ctx, name, tc, tr) {
+    if (name === "3-2-1 beep" || name === "Dono")
+      for (let k = 3; k >= 1; k--) if (tr - k >= tc - 0.01) tone(ctx, tr - k, k === 1 ? 1320 : 990, 0.18, 0.4, "sine");
+    if (name === "Buzzer" || name === "Dono") { tone(ctx, tr - 0.5, 150, 0.5, 0.3, "sawtooth", 0, 1200); tone(ctx, tr - 0.5, 155, 0.5, 0.2, "square", 0, 900); }
+  }
+  /** Seconds of the clock tick that the end sound replaces (so the two don't clash). */
+  const endTakesOver = (name) => name === "3-2-1 beep" || name === "Dono" ? 3 : 0;
+
+  /** All the sound effects of one question, starting at offset o. */
+  function scheduleEffects(ctx, s, T, o, mcq) {
+    const qs = s.qSound || "Whoosh", es = s.endSound || "3-2-1 beep";
+    questionSound(ctx, qs, o + 0.05);
+    if (mcq && qs !== "Koi nahi") T.appear.forEach((a) => optionPop(ctx, o + a));
+    const skip = endTakesOver(es);
+    for (let j = 0; j < T.timer - skip; j++) scheduleTick(ctx, s.tick, o + T.tc + j, j);
+    endSound(ctx, es, o + T.tc, o + T.tr);
+    answerSound(ctx, s.aSound || "Ding", o + T.tr);
+  }
+
+  /** Plays one effect right now (the ▶ buttons). kind: tick | q | a | end */
+  function previewSound(ctx, kind, name) {
+    const t = ctx.currentTime + 0.05;
+    if (kind === "tick") for (let j = 0; j < 3; j++) scheduleTick(ctx, name, t + j, j);
+    if (kind === "q") questionSound(ctx, name, t);
+    if (kind === "a") answerSound(ctx, name, t);
+    if (kind === "end") endSound(ctx, name, t, t + 3);
+  }
+
   function play(ctx, buffer, when, gain = 1) {
     if (!buffer) return;
     const src = ctx.createBufferSource(), g = ctx.createGain();
@@ -734,7 +829,7 @@
           vq = await speak(q.question, actx);
           const ans = q.type === "single" ? q.answer : q.options[q.correct];
           va = await speak((URDU.test(ans || q.question) ? "صحیح جواب: " : "Correct answer: ") + (ans || ""), actx);
-        } catch (e) { voiceFailed = true; warnings.push("Awaz nahi bani (internet?): video bina awaz ke bani."); vq = va = null; }
+        } catch (e) { voiceFailed = true; warnings.push("Bolne wali awaz nahi bani (internet?): baqi awazein video mein hain."); vq = va = null; }
       }
       voices.push({ vq, va, dur: [vq ? vq.duration : 1.2, va ? va.duration : 0.8] });
     }
@@ -751,8 +846,7 @@
     Ts.forEach((T, k) => {
       const o = offsets[k];
       play(off, voices[k].vq, o + T.tq); play(off, voices[k].va, o + T.ta);
-      for (let j = 0; j < T.timer; j++) scheduleTick(off, s.tick, o + T.tc + j, j);
-      scheduleDing(off, o + T.tr);
+      scheduleEffects(off, s, T, o, questions[k].type !== "single");
     });
     if (s.music) {
       const src = off.createBufferSource(), g = off.createGain();
@@ -826,5 +920,5 @@
     return { blob: new Blob([muxer.target.buffer], { type: "video/mp4" }), seconds: total, warnings, size: [width, height] };
   }
 
-  window.QuizRender = { DESIGNS, THEMES, BACKGROUNDS, COUNTDOWNS, TICKS, renderStill, makeVideo, W, H };
+  window.QuizRender = { DESIGNS, THEMES, BACKGROUNDS, COUNTDOWNS, TICKS, Q_SOUNDS, A_SOUNDS, END_SOUNDS, previewSound, renderStill, makeVideo, W, H };
 })();

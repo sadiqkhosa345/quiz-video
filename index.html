@@ -43,12 +43,12 @@
 
       <div id="mcqBox">
         <div class="opts">
-          <label class="opt"><input type="radio" name="correct" value="0"><span class="badge b0">A</span><input type="text" dir="auto" class="optIn" placeholder="Option A"></label>
-          <label class="opt"><input type="radio" name="correct" value="1"><span class="badge b1">B</span><input type="text" dir="auto" class="optIn" placeholder="Option B"></label>
-          <label class="opt"><input type="radio" name="correct" value="2"><span class="badge b2">C</span><input type="text" dir="auto" class="optIn" placeholder="Option C"></label>
-          <label class="opt"><input type="radio" name="correct" value="3"><span class="badge b3">D</span><input type="text" dir="auto" class="optIn" placeholder="Option D"></label>
+          <div class="opt"><label class="row"><input type="radio" name="correct" value="0"><span class="badge b0">A</span></label><input type="text" dir="auto" class="optIn" placeholder="Option A"><label class="picbtn optPic" data-i="0"><span>📷</span><input type="file" accept="image/*" class="optImg" data-i="0" hidden></label><button class="ghost xbtn optClear" data-i="0" aria-label="Image hatao" hidden>×</button></div>
+          <div class="opt"><label class="row"><input type="radio" name="correct" value="1"><span class="badge b1">B</span></label><input type="text" dir="auto" class="optIn" placeholder="Option B"><label class="picbtn optPic" data-i="1"><span>📷</span><input type="file" accept="image/*" class="optImg" data-i="1" hidden></label><button class="ghost xbtn optClear" data-i="1" aria-label="Image hatao" hidden>×</button></div>
+          <div class="opt"><label class="row"><input type="radio" name="correct" value="2"><span class="badge b2">C</span></label><input type="text" dir="auto" class="optIn" placeholder="Option C"><label class="picbtn optPic" data-i="2"><span>📷</span><input type="file" accept="image/*" class="optImg" data-i="2" hidden></label><button class="ghost xbtn optClear" data-i="2" aria-label="Image hatao" hidden>×</button></div>
+          <div class="opt"><label class="row"><input type="radio" name="correct" value="3"><span class="badge b3">D</span></label><input type="text" dir="auto" class="optIn" placeholder="Option D"><label class="picbtn optPic" data-i="3"><span>📷</span><input type="file" accept="image/*" class="optImg" data-i="3" hidden></label><button class="ghost xbtn optClear" data-i="3" aria-label="Image hatao" hidden>×</button></div>
         </div>
-        <p class="hint">Sahi jawab ke aage wala gol nishan dabayein.</p>
+        <p class="hint">Sahi jawab ke aage wala gol nishan dabayein. 📷 = us option ki image (naam ke bina bhi chal jati hai).</p>
       </div>
 
       <div id="singleBox" hidden>
@@ -85,12 +85,17 @@
         <div><label class="lbl">Poori video (second, 0 = auto)</label><input type="number" id="length" min="0" max="300" value="25"></div>
         <div><label class="lbl">Quality</label>
           <select id="res"><option value="1080">1080p</option><option value="2160">4K</option><option value="720">720p</option></select></div>
-        <div><label class="lbl">Countdown awaz</label><select id="tick"></select></div>
         <div><label class="lbl">Heading (QUIZ #1)</label>
           <div class="row"><input type="checkbox" id="showHead" class="switch"><input type="text" id="title" value="QUIZ" class="small"></div></div>
       </div>
-      <div class="row gap wrap">
-        <label class="row"><input type="checkbox" id="voice" class="switch" checked><span>Awaz (sawal + jawab bolna, internet chahiye)</span></label>
+      <h3 class="sub">🗣 Bolne wali awaz</h3>
+      <label class="row voicebox"><input type="checkbox" id="voice" class="switch" checked><span id="voiceLbl">Sawal aur jawab bol kar sunao (tick karein to aayegi, na karein to nahi). Internet chahiye.</span></label>
+      <h3 class="sub">🔔 Baqi awazein (alag, hamesha chalti hain)</h3>
+      <div class="grid2">
+        <div><label class="lbl">Clock / tick awaz</label><div class="row"><select id="tick"></select><button class="ghost sm play" data-k="tick" data-sel="tick">▶</button></div></div>
+        <div><label class="lbl">Sawal aane ki awaz</label><div class="row"><select id="qSound"></select><button class="ghost sm play" data-k="q" data-sel="qSound">▶</button></div></div>
+        <div><label class="lbl">Countdown khatam awaz</label><div class="row"><select id="endSound"></select><button class="ghost sm play" data-k="end" data-sel="endSound">▶</button></div></div>
+        <div><label class="lbl">Jawab aane ki awaz</label><div class="row"><select id="aSound"></select><button class="ghost sm play" data-k="a" data-sel="aSound">▶</button></div></div>
       </div>
       <div class="row gap wrap">
         <label class="picbtn" id="musicBtn">Music chuno<input type="file" accept="audio/*" id="music" hidden></label>
