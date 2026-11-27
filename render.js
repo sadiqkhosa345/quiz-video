@@ -97,7 +97,7 @@
   }
   function drawCover(ctx, img, box, r) {
     const [x0, y0, x1, y1] = box, bw = x1 - x0, bh = y1 - y0;
-    const iw = img.width, ih = img.height, s = Math.max(bw / iw, bh / ih);
+    const iw = img.videoWidth || img.width, ih = img.videoHeight || img.height, s = Math.max(bw / iw, bh / ih);
     const sw = bw / s, sh = bh / s, sx = (iw - sw) / 2, sy = (ih - sh) * 0.3;   // faces sit in the upper part
     ctx.save();
     rrPath(ctx, x0, y0, x1, y1, r); ctx.clip();
@@ -518,8 +518,28 @@
 
   const fadeIn = (t, start, d) => Math.max(0, Math.min(1, (t - start) / d));
 
+  /** Background: the user's video (darkened a little so the text stays readable) or the drawn pattern. */
+  function drawBg(ctx, bg, s) {
+    const v = s.bgVideo;
+    if (v && v.readyState >= 2) {
+      drawCover(ctx, v, [0, 0, W, H], 0);
+      ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.fillRect(0, 0, W, H);
+    } else ctx.drawImage(bg, 0, 0);
+  }
+  /** Move the background video to second t (looping) and wait until that picture is ready. */
+  function seekVideo(v, t) {
+    t = v.duration > 0 ? t % v.duration : 0;
+    if (Math.abs(v.currentTime - t) < 0.02 && v.readyState >= 2) return Promise.resolve();
+    return new Promise((res) => {
+      const done = () => { v.removeEventListener("seeked", done); clearTimeout(timer); res(); };
+      const timer = setTimeout(done, 1500);
+      v.addEventListener("seeked", done);
+      v.currentTime = t;
+    });
+  }
+
   function drawFrame(ctx, bg, L, q, T, t, s, design) {
-    ctx.drawImage(bg, 0, 0);
+    drawBg(ctx, bg, s);
     const { tr } = T, revealA = fadeIn(t, tr, REVEAL_FADE);
     if (revealA < 1) {
       ctx.drawImage(L.base, 0, 0);
@@ -792,6 +812,7 @@
     rec.start(1000);
     const start = live.currentTime + 0.2;
     src.start(start);
+    if (s.bgVideo) { s.bgVideo.loop = true; s.bgVideo.currentTime = 0; s.bgVideo.play().catch(() => {}); }
 
     let current = 0;
     await new Promise((done) => {
@@ -811,6 +832,7 @@
       step();
     });
     rec.stop();
+    if (s.bgVideo) s.bgVideo.pause();
     await stopped;
     stream.getTracks().forEach((tr) => tr.stop());
     layers.forEach((L) => L && freeLayers(L));
@@ -881,7 +903,7 @@
     // 4. Encoders + muxer. No audio encoder (iPhone Safari): record in real time instead, so the sound stays.
     const acfg = s.forceRealtime ? null : await pickAudioConfig();
     const rtMime = realtimeMime();
-    if ((!acfg || !s._vcfg) && rtMime) return recordRealtime(questions, s, Ts, offsets, total, mixed, [width, height], onProgress, warnings, rtMime);
+    if ((!acfg || !s._vcfg || s.bgVideo) && rtMime) return recordRealtime(questions, s, Ts, offsets, total, mixed, [width, height], onProgress, warnings, rtMime);
     if (!acfg) warnings.push("Is phone par audio encoder nahi: video bina awaz ke bani.");
     const muxer = new Mp4Muxer.Muxer({
       target: new Mp4Muxer.ArrayBufferTarget(),
@@ -927,6 +949,7 @@
       for (; f < last; f++) {
         if (encError) throw encError;
         const t = f / FPS - o;
+        if (s.bgVideo && f % 2 === 0) await seekVideo(s.bgVideo, f / FPS);
         drawFrame(wctx, bg, L, q, T, t, s, design);
         fctx.drawImage(work, 0, 0, width, height);
         const vf = new VideoFrame(frame, { timestamp: Math.round(f * 1e6 / FPS), duration: Math.round(1e6 / FPS) });

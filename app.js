@@ -21,7 +21,7 @@
   let qi = 0;
   const prefs = Object.assign({ design: "Classic", theme: "Purple", background: "Auto", countdown: "Number + bar", timer: 10,
     answerSecs: 3, length: 25, res: "1080", tick: "Clock", qSound: "Whoosh", aSound: "Ding", endSound: "3-2-1 beep", voice: true, showHead: false, title: "QUIZ" }, store.get(PREFS, {}));
-  let music = null, musicName = "", lastVideo = null;
+  let music = null, musicName = "", lastVideo = null, bgVideo = null;
 
   function toast(msg, ms = 3500) {
     const t = $("toast"); t.textContent = msg; t.hidden = false;
@@ -151,7 +151,7 @@
       design: prefs.design, theme: prefs.theme, background: prefs.background, countdown: prefs.countdown,
       timer: Math.max(3, Math.min(30, +$("timer").value || 10)), answerSecs: Math.max(1, Math.min(30, +$("answerSecs").value || 3)),
       length: Math.max(0, +$("length").value || 0), res: +$("res").value, tick: $("tick").value, qSound: $("qSound").value, aSound: $("aSound").value, endSound: $("endSound").value, voice: $("voice").checked,
-      showHead: $("showHead").checked, title: $("title").value.trim() || "QUIZ", music,
+      showHead: $("showHead").checked, title: $("title").value.trim() || "QUIZ", music, bgVideo,
     };
   }
   function savePrefs() {
@@ -207,6 +207,35 @@
     $("previewModal").hidden = false;
   };
   $("closePreview").onclick = () => ($("previewModal").hidden = true);
+
+  // ---------- background video ----------
+  function clearBgVideo() {
+    if (bgVideo) { URL.revokeObjectURL(bgVideo.src); bgVideo.removeAttribute("src"); bgVideo.load(); }
+    bgVideo = null;
+    $("bgVidBtn").firstChild.textContent = "🎬 Background video chuno"; $("bgVidBtn").classList.remove("on");
+    $("clearBgVid").hidden = true;
+    drawThumbs();
+  }
+  $("bgVid").onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    toast("Video load ho rahi hai...");
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.setAttribute("playsinline", ""); v.preload = "auto"; v.loop = true;
+    v.src = URL.createObjectURL(f);
+    try {
+      await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error("bad")); setTimeout(() => rej(new Error("slow")), 20000); v.load(); });
+      await new Promise((res) => { v.onseeked = res; v.currentTime = Math.min(1, (v.duration || 2) / 2); setTimeout(res, 3000); });
+    } catch (err) { URL.revokeObjectURL(v.src); return toast("Ye video nahi chali. Koi aur (MP4) chunein."); }
+    if (bgVideo) clearBgVideo();
+    bgVideo = v;
+    $("bgVidBtn").firstChild.textContent = "✓ " + f.name.slice(0, 22); $("bgVidBtn").classList.add("on");
+    $("clearBgVid").hidden = false;
+    toast("Background video lag gayi. Video awaz ke bina chalegi.", 4000);
+    drawThumbs();
+  };
+  $("clearBgVid").onclick = clearBgVideo;
 
   // ---------- music ----------
   $("music").onchange = async (e) => {
