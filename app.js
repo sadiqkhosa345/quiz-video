@@ -4,6 +4,11 @@
   "use strict";
   const R = window.QuizRender;
   const $ = (id) => document.getElementById(id);
+  // iPhone mutes web sound when the side (silent) switch is on, unless the page asks for "playback" audio.
+  function playbackAudio() {
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) { /* older iOS */ }
+  }
+  playbackAudio();
   const DRAFT = "quizDraft.v1", PREFS = "quizPrefs.v1";
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
@@ -236,6 +241,7 @@
     const btn = $("makeBtn");
     // iPhone only lets sound start from a tap: open the audio now, before anything else waits.
     let liveAudio = null;
+    playbackAudio();
     try { liveAudio = new (window.AudioContext || window.webkitAudioContext)(); liveAudio.resume(); } catch (e) { /* none */ }
     btn.disabled = true; $("progressBox").hidden = false; $("result").hidden = true;
     const keepAwake = navigator.wakeLock ? await navigator.wakeLock.request("screen").catch(() => null) : null;
@@ -246,7 +252,7 @@
       const url = URL.createObjectURL(out.blob);
       $("player").src = url;
       $("result").hidden = false;
-      $("resultInfo").textContent = `${Math.round(out.seconds)}s video · ${out.size[0]}×${out.size[1]} · ${(out.blob.size / 1e6).toFixed(1)} MB · ${Math.round((performance.now() - started) / 1000)}s mein bani`
+      $("resultInfo").textContent = `${Math.round(out.seconds)}s video · ${out.size[0]}×${out.size[1]} · ${(out.blob.size / 1e6).toFixed(1)} MB · ${Math.round((performance.now() - started) / 1000)}s mein bani · awaz: ${out.audio === "none" ? "NAHI" : out.audio}`
         + (out.warnings.length ? " · " + out.warnings.join(" ") : "");
       $("status").textContent = "Tayyar!";
     } catch (err) {
@@ -313,6 +319,7 @@
     let fx = null;
     document.querySelectorAll("button.play").forEach((b) => (b.onclick = () => {
       try {
+        playbackAudio();
         fx = fx || new (window.AudioContext || window.webkitAudioContext)();
         fx.resume(); R.previewSound(fx, b.dataset.k, $(b.dataset.sel).value);
       } catch (e) { toast("Awaz nahi chali."); }
